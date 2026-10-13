@@ -34,7 +34,7 @@
 Clone the repository and install using `make`:
 
 ```bash
-git clone https://github.com/<your-username>/linsanity.git
+git clone https://github.com/<sohan1323>/linsanity.git
 cd linsanity
 sudo make install
 ```
