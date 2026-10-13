@@ -34,7 +34,7 @@
 Clone the repository and install using `make`:
 
 ```bash
-git clone https://github.com/<sohan1323>/linsanity.git
+git clone https://github.com/sohan1323/linsanity.git
 cd linsanity
 sudo make install
 ```
@@ -55,7 +55,7 @@ sudo make uninstall
 ### Option 2: Run Directly without Installing
 
 ```bash
-git clone https://github.com/<your-username>/linsanity.git
+git clone https://github.com/sohan1323/linsanity.git
 cd linsanity
 chmod +x bin/linsanity
 sudo ./bin/linsanity
