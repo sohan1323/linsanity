@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Linsanity - Linux User Account Security & Identity Auditor
+# Version: 1.0.0
+# Description: Lightweight zero-dependency Linux account security auditing CLI.
+# Checks: Non-standard UID 0 accounts, passwordless accounts, expired accounts,
+#         and interactive login shell attack surface.
+# ==============================================================================
+
+set -o pipefail
+
+VERSION="1.0.0"
+
+# ANSI Color Codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+print_banner() {
+    cat << "EOF"
+  _      _                          _ _         
+ | |    (_)_ __  ___  __ _ _ __   (_) |_ _   _ 
+ | |    | | '_ \/ __|/ _` | '_ \  | | __| | | |
+ | |___ | | | | \__ \ (_| | | | | | | |_| |_| |
+ |_____|_|_| |_|___/\__,_|_| |_| |_|\__|\__, |
+                                         |___/ 
+      Linux User Account Security Auditor
+EOF
+    echo -e "                 Version: ${CYAN}${VERSION}${NC}\n"
+}
+
+show_help() {
+    print_banner
+    cat << EOF
+Usage: sudo linsanity [OPTIONS]
+
+Description:
+  Audits local user accounts on Linux systems against identity management
+  and privilege escalation risks (/etc/passwd, /etc/shadow).
+
+Options:
+  -h, --help       Show this help message and exit
+  -v, --version    Show version information and exit
+
+Security Checks:
+  1. Superuser Privilege Discovery (UID 0 users)
+  2. Empty Password Detection (/etc/shadow)
+  3. Account Expiration Audit (Unix epoch tracking)
+  4. Interactive Login Shell Enumeration
+
+Notes:
+  This tool requires root privileges to read /etc/shadow.
+EOF
+}
+
+# Parse Command-Line Options
+case "$1" in
+    -h|--help)
+        show_help
+        exit 0
+        ;;
+    -v|--version)
+        echo "linsanity v${VERSION}"
+        exit 0
+        ;;
+esac
+
+# 1. Enforce Root Privileges
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}[!] Error: linsanity must be run as root (or with sudo) to read /etc/shadow.${NC}"
+    exit 1
+fi
+
+print_banner
+
+# Initialize summary counters
+alerts_count=0
+
+# ------------------------------------------------------------------------------
+# [1] Privilege Discovery: UID 0 Accounts
+# ------------------------------------------------------------------------------
+echo -e "${BOLD}=== [1] Auditing UID 0 (Superuser) Accounts ===${NC}"
+
+awk -F: '$3 == 0 { print $1 }' /etc/passwd | while read -r user; do
+    if [ "$user" != "root" ]; then
+        echo -e "${RED}[ALERT] Non-standard superuser detected: ${BOLD}${user}${NC}${RED} (UID 0)${NC}"
+        ((alerts_count++))
+    else
+        echo -e "${GREEN}[INFO] Standard root user verified: ${user} (UID 0)${NC}"
+    fi
+done
+
+echo ""
+
+# ------------------------------------------------------------------------------
+# [2] Identity Management: Passwordless Accounts
+# ------------------------------------------------------------------------------
+echo -e "${BOLD}=== [2] Auditing Password Status (/etc/shadow) ===${NC}"
+
+empty_pass_count=0
+
+while IFS=: read -r username password rest; do
+    if [ -z "$password" ]; then
+        echo -e "${RED}[CRITICAL] Account has NO password set: ${BOLD}${username}${NC}"
+        ((empty_pass_count++))
+        ((alerts_count++))
+    fi
+done < /etc/shadow
+
+if [ "$empty_pass_count" -eq 0 ]; then
+    echo -e "${GREEN}[OK] No passwordless accounts detected.${NC}"
+fi
+
+echo ""
+
+# ------------------------------------------------------------------------------
+# [3] Account Lifecycle: Expired Accounts
+# ------------------------------------------------------------------------------
+echo -e "${BOLD}=== [3] Auditing Account Expiration (/etc/shadow) ===${NC}"
+
+current_days=$(( $(date +%s) / 86400 ))
+expired_count=0
+
+while IFS=: read -r user pass last min max warn inact expire rest; do
+    if [ -n "$expire" ]; then
+        if [ "$expire" -le "$current_days" ]; then
+            expire_date=$(date -d "@$(( expire * 86400 ))" +%Y-%m-%d 2>/dev/null || echo "Epoch Day: $expire")
+            echo -e "${YELLOW}[EXPIRED] Account: ${BOLD}${user}${NC}${YELLOW} | Expired on: ${expire_date}${NC}"
+            ((expired_count++))
+            ((alerts_count++))
+        fi
+    fi
+done < /etc/shadow
+
+if [ "$expired_count" -eq 0 ]; then
+    echo -e "${GREEN}[OK] No expired accounts found.${NC}"
+fi
+
+echo ""
+
+# ------------------------------------------------------------------------------
+# [4] Attack Surface: Interactive Login Shells
+# ------------------------------------------------------------------------------
+echo -e "${BOLD}=== [4] Auditing Interactive Login Shells (/etc/passwd) ===${NC}"
+echo -e "${CYAN}[*] Users configured with an interactive shell:${NC}"
+
+grep -E '(/bin/bash|/bin/sh|/bin/zsh)$' /etc/passwd | cut -d: -f1,7 | while IFS=: read -r user shell; do
+    echo -e "    - ${BOLD}${user}${NC} (Shell: ${CYAN}${shell}${NC})"
+done
+
+echo ""
+echo -e "${BOLD}================================================================${NC}"
+echo -e "${BOLD}                   AUDIT COMPLETE                               ${NC}"
+echo -e "${BOLD}================================================================${NC}"
+
+if [ "$alerts_count" -gt 0 ]; then
+    echo -e "${YELLOW}[!] Audit completed with security warnings/findings.${NC}"
+    exit 2
+else
+    echo -e "${GREEN}[✓] System passed all identity and privilege checks.${NC}"
+    exit 0
+fi
